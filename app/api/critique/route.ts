@@ -2,6 +2,7 @@ import { generateText, type LanguageModel } from "ai"
 import { google } from "@ai-sdk/google"
 import { anthropic } from "@ai-sdk/anthropic"
 import { openai } from "@ai-sdk/openai"
+import { groq } from "@ai-sdk/groq"
 import { INVESTORS, VERDICT_PROMPT } from "@/lib/investors"
 
 export const maxDuration = 60
@@ -9,12 +10,18 @@ export const runtime = "nodejs"
 
 /**
  * Provider auto-detection.
- * - Prefers GOOGLE_GENERATIVE_AI_API_KEY (Gemini — fast and cheap).
+ * - Prefers GROQ_API_KEY (very fast inference, free tier available).
+ * - Then GOOGLE_GENERATIVE_AI_API_KEY (Gemini — fast and cheap).
  * - Then ANTHROPIC_API_KEY.
  * - Then OPENAI_API_KEY.
  * - Returns a clear 503 if none are set, so the UI can surface a real message.
  */
-function resolveModel(): { model: LanguageModel; provider: "google" | "anthropic" | "openai" } | null {
+function resolveModel():
+  | { model: LanguageModel; provider: "groq" | "google" | "anthropic" | "openai" }
+  | null {
+  if (process.env.GROQ_API_KEY) {
+    return { model: groq("llama-3.3-70b-versatile"), provider: "groq" }
+  }
   if (process.env.GOOGLE_GENERATIVE_AI_API_KEY) {
     return { model: google("gemini-2.0-flash"), provider: "google" }
   }
@@ -40,7 +47,7 @@ export async function POST(req: Request) {
       return Response.json(
         {
           error:
-            "No AI provider configured. Add GOOGLE_GENERATIVE_AI_API_KEY, ANTHROPIC_API_KEY, or OPENAI_API_KEY to your environment variables and redeploy.",
+            "No AI provider configured. Add GROQ_API_KEY, GOOGLE_GENERATIVE_AI_API_KEY, ANTHROPIC_API_KEY, or OPENAI_API_KEY to your environment variables and redeploy.",
         },
         { status: 503 },
       )
