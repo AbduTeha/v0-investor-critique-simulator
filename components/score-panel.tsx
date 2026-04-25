@@ -2,16 +2,27 @@
 
 import { useEffect, useState } from "react"
 import { cn } from "@/lib/utils"
-import { Skull, Wrench, Zap, Flame, Sparkles } from "lucide-react"
+import { Skull, Wrench, Zap, Flame, Sparkles, Pencil, RefreshCw } from "lucide-react"
 
 type Props = {
   score: number
   verdict: string
   mustFix: string
   visible: boolean
+  isRevision?: boolean
+  onRevise?: () => void
+  onReset?: () => void
 }
 
-export function ScorePanel({ score, verdict, mustFix, visible }: Props) {
+export function ScorePanel({
+  score,
+  verdict,
+  mustFix,
+  visible,
+  isRevision,
+  onRevise,
+  onReset,
+}: Props) {
   const [displayScore, setDisplayScore] = useState(0)
 
   useEffect(() => {
@@ -131,6 +142,53 @@ export function ScorePanel({ score, verdict, mustFix, visible }: Props) {
           <span>100 · UNICORN</span>
         </div>
       </div>
+
+      {/* Revision actions */}
+      {(onRevise || onReset) && (
+        <div className="relative mt-7 flex flex-col gap-2 border-t border-border/60 pt-5 sm:flex-row sm:items-center sm:justify-between">
+          <p className="text-pretty text-sm text-muted-foreground">
+            <span className="font-mono text-[10px] tracking-widest text-foreground/80">
+              SECOND CHANCE
+            </span>
+            <span className="ml-2">
+              Take the panel&apos;s feedback. Revise your pitch — they&apos;ll remember what you said.
+            </span>
+          </p>
+          <div className="flex shrink-0 gap-2">
+            {onReset && (
+              <button
+                type="button"
+                onClick={onReset}
+                className="inline-flex items-center gap-1.5 rounded-md border border-border bg-background px-3 py-2 font-mono text-xs font-medium text-muted-foreground transition-colors hover:border-border hover:text-foreground"
+              >
+                <RefreshCw className="h-3.5 w-3.5" aria-hidden="true" />
+                Start over
+              </button>
+            )}
+            {onRevise && (
+              <button
+                type="button"
+                onClick={onRevise}
+                className="inline-flex items-center gap-1.5 rounded-md border border-red-500/50 bg-red-500/10 px-3 py-2 font-mono text-xs font-semibold tracking-wide text-red-300 transition-colors hover:bg-red-500/15 hover:text-red-200"
+              >
+                <Pencil className="h-3.5 w-3.5" aria-hidden="true" />
+                Revise pitch
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Round 2 indicator */}
+      {isRevision && (
+        <span
+          aria-hidden="true"
+          className="absolute right-4 top-4 inline-flex items-center gap-1.5 rounded-sm border border-red-500/40 bg-red-500/10 px-1.5 py-0.5 font-mono text-[10px] font-semibold tracking-[0.2em] text-red-400"
+        >
+          <RefreshCw className="h-3 w-3" aria-hidden="true" />
+          ROUND 2
+        </span>
+      )}
     </section>
   )
 }

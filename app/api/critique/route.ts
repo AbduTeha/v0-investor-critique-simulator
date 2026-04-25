@@ -1,91 +1,61 @@
-import { generateText, type LanguageModel } from "ai"
-import { groq } from "@ai-sdk/groq"
-import { google } from "@ai-sdk/google"
-import { anthropic } from "@ai-sdk/anthropic"
-import { openai } from "@ai-sdk/openai"
 import { INVESTORS, VERDICT_PROMPT } from "@/lib/investors"
+import {
+  resolveModel,
+  generateWithRetry,
+  extractApiErrorMessage,
+  NO_PROVIDER_MESSAGE,
+} from "@/lib/ai"
 
 export const maxDuration = 60
 export const runtime = "nodejs"
 
-/**
- * Provider auto-detection.
- * - Prefers GROQ_API_KEY (free tier, no card, fastest inference — perfect for
- *   the parallel-fire investor demo).
- * - Then GOOGLE_GENERATIVE_AI_API_KEY (Gemini 1.5 Flash, generous free tier).
- * - Then ANTHROPIC_API_KEY, then OPENAI_API_KEY.
- */
-function resolveModel(): {
-  model: LanguageModel
-  provider: "groq" | "google" | "anthropic" | "openai"
-} | null {
-  if (process.env.GROQ_API_KEY) {
-    // llama-3.3-70b-versatile is excellent for personality-driven prompts and
-    // is on Groq's free tier with very high RPM limits.
-    return { model: groq("llama-3.3-70b-versatile"), provider: "groq" }
-  }
-  if (process.env.GOOGLE_GENERATIVE_AI_API_KEY) {
-    return { model: google("gemini-1.5-flash-latest"), provider: "google" }
-  }
-  if (process.env.ANTHROPIC_API_KEY) {
-    return { model: anthropic("claude-3-5-haiku-latest"), provider: "anthropic" }
-  }
-  if (process.env.OPENAI_API_KEY) {
-    return { model: openai("gpt-4o-mini"), provider: "openai" }
-  }
-  return null
-}
+type PreviousCritique = { id: string; critique: string }
 
-/**
- * Wrap generateText with exponential backoff on 429 (rate-limit) responses.
- * Free-tier Gemini keys can briefly throttle when 6 calls fire in parallel.
- */
-async function generateWithRetry(
-  args: Parameters<typeof generateText>[0],
-  maxAttempts = 4,
-): Promise<{ text: string }> {
-  let lastErr: unknown
-  for (let attempt = 0; attempt < maxAttempts; attempt++) {
-    try {
-      const result = await generateText(args)
-      return { text: result.text }
-    } catch (err) {
-      lastErr = err
-      const status = (err as { statusCode?: number; status?: number })?.statusCode
-        ?? (err as { status?: number })?.status
-      const isRateLimit = status === 429
-      const isRetryable = isRateLimit || status === 503 || status === 502
-      if (!isRetryable || attempt === maxAttempts - 1) break
+function buildCritiquePrompt(
+  pitch: string,
+  investorId: string,
+  previousPitch?: string,
+  previousCritiques?: PreviousCritique[],
+): string {
+  const myPrev = previousCritiques?.find((c) => c.id === investorId)?.critique
 
-      // Exponential backoff with jitter: 600ms, 1.5s, 3.5s
-      const base = 600 * Math.pow(2.2, attempt)
-      const jitter = Math.random() * 400
-      await new Promise((r) => setTimeout(r, base + jitter))
-    }
-  }
-  throw lastErr
-}
+  if (previousPitch && myPrev) {
+    return `You already heard this founder pitch you a few minutes ago.
 
-function extractApiErrorMessage(err: unknown): string {
-  if (err && typeof err === "object") {
-    const e = err as { statusCode?: number; message?: string; responseBody?: string }
-    if (e.statusCode === 429) {
-      return "Rate limit hit on the AI provider (free tier). Wait ~30 seconds and try again, or upgrade the key."
-    }
-    if (e.statusCode === 401 || e.statusCode === 403) {
-      return "AI provider rejected the API key. Check the key value and that the API is enabled."
-    }
-    if (typeof e.message === "string" && e.message.length > 0) {
-      // Trim the verbose error to something readable in the UI
-      return e.message.split("\n")[0].slice(0, 240)
-    }
+Their PREVIOUS pitch was:
+"""${previousPitch}"""
+
+Your previous critique was:
+"${myPrev}"
+
+The founder has now revised. Here is the new pitch:
+"""${pitch}"""
+
+React to the REVISION specifically. Did they actually address your concern from last time, or did they dodge it?
+- If they addressed it, acknowledge that crisply and find the next sharpest issue.
+- If they dodged it, hit harder and call out the dodge by name.
+Reference your previous concern naturally — you remember what you said.
+Stay 100% in character. 2-6 sentences. No greeting. Open mid-thought.`
   }
-  return "AI provider call failed."
+
+  return `The founder just pitched you in the meeting:
+
+"""${pitch}"""
+
+It's your turn to speak. Stay 100% in character — voice, vocabulary, attitude, all of it. React the way YOU specifically would react. No greeting. Open mid-thought. 2-6 sentences. Vary your cadence — short and brutal, or longer with one concession before the kill. Be the human being described in your persona, not a generic VC.`
 }
 
 export async function POST(req: Request) {
   try {
-    const { pitch } = (await req.json()) as { pitch?: string }
+    const {
+      pitch,
+      previousPitch,
+      previousCritiques,
+    } = (await req.json()) as {
+      pitch?: string
+      previousPitch?: string
+      previousCritiques?: PreviousCritique[]
+    }
 
     if (!pitch || typeof pitch !== "string" || pitch.trim().length < 10) {
       return Response.json({ error: "Pitch must be at least 10 characters." }, { status: 400 })
@@ -93,26 +63,25 @@ export async function POST(req: Request) {
 
     const resolved = resolveModel()
     if (!resolved) {
-      return Response.json(
-        {
-          error:
-            "No AI provider configured. Add GROQ_API_KEY, GOOGLE_GENERATIVE_AI_API_KEY, ANTHROPIC_API_KEY, or OPENAI_API_KEY to your environment variables and redeploy.",
-        },
-        { status: 503 },
-      )
+      return Response.json({ error: NO_PROVIDER_MESSAGE }, { status: 503 })
     }
     const { model } = resolved
 
     const trimmedPitch = pitch.trim()
+    const isRevision = Boolean(previousPitch && previousCritiques?.length)
 
     // ALL 5 investors fire IN PARALLEL — this is what makes the demo feel fast.
-    // Each call retries on 429 so a brief rate-limit blip doesn't break the run.
     const critiquePromises = INVESTORS.map(async (investor) => {
       try {
         const { text } = await generateWithRetry({
           model,
           system: investor.systemPrompt,
-          prompt: `The founder just pitched you in the meeting:\n\n"""${trimmedPitch}"""\n\nIt's your turn to speak. Stay 100% in character — voice, vocabulary, attitude, all of it. React the way YOU specifically would react. No greeting. Open mid-thought. 2-6 sentences. Vary your cadence — short and brutal, or longer with one concession before the kill. Be the human being described in your persona, not a generic VC.`,
+          prompt: buildCritiquePrompt(
+            trimmedPitch,
+            investor.id,
+            previousPitch,
+            previousCritiques,
+          ),
           temperature: 0.95,
           maxOutputTokens: 320,
         })
@@ -137,14 +106,12 @@ export async function POST(req: Request) {
 
     const critiques = await Promise.all(critiquePromises)
 
-    // If every investor failed, surface the real underlying reason.
     if (critiques.every((c) => !c.ok)) {
-      const firstReason = critiques.find((c) => c.errorMessage)?.errorMessage
-        ?? "All investor calls failed."
+      const firstReason =
+        critiques.find((c) => c.errorMessage)?.errorMessage ?? "All investor calls failed."
       return Response.json({ error: firstReason }, { status: 502 })
     }
 
-    // Compose the panel transcript and ask for the verdict (6th call).
     const transcript = critiques
       .map((c) => {
         const inv = INVESTORS.find((i) => i.id === c.id)!
@@ -157,10 +124,31 @@ export async function POST(req: Request) {
     let mustFix = "Sharpen the single most important reason this needs to exist now."
 
     try {
+      const verdictUserPrompt = isRevision
+        ? `THIS IS A REVISED PITCH (round 2 with the same panel).
+
+ORIGINAL PITCH:
+"""${previousPitch}"""
+
+REVISED PITCH:
+"""${trimmedPitch}"""
+
+PANEL CRITIQUES OF THE REVISION:
+${transcript}
+
+Now write the moderator's read of the room AFTER the revision. If the panel feels the founder genuinely addressed concerns, the score should rise meaningfully vs. round 1. If they dodged, the score should drop. The mustFix MUST paraphrase the single sharpest thing the panel said about the REVISED pitch. Return ONLY the JSON.`
+        : `PITCH:
+"""${trimmedPitch}"""
+
+PANEL CRITIQUES:
+${transcript}
+
+Now write the moderator's read of the room. The mustFix MUST paraphrase the single sharpest thing the panel said — do not invent generic advice. Return ONLY the JSON.`
+
       const { text: verdictRaw } = await generateWithRetry({
         model,
         system: VERDICT_PROMPT,
-        prompt: `PITCH:\n"""${trimmedPitch}"""\n\nPANEL CRITIQUES:\n${transcript}\n\nNow write the moderator's read of the room. The mustFix MUST paraphrase the single sharpest thing the panel said — do not invent generic advice. Return ONLY the JSON.`,
+        prompt: verdictUserPrompt,
         temperature: 0.6,
         maxOutputTokens: 340,
       })
@@ -171,7 +159,6 @@ export async function POST(req: Request) {
         .replace(/```$/i, "")
         .trim()
 
-      // Be lenient: extract the first JSON object if the model wrapped it in prose.
       const jsonMatch = cleaned.match(/\{[\s\S]*\}/)
       const parsed = JSON.parse(jsonMatch ? jsonMatch[0] : cleaned)
 
@@ -180,7 +167,6 @@ export async function POST(req: Request) {
       if (parsed.mustFix) mustFix = String(parsed.mustFix).trim()
     } catch (err) {
       console.error("[v0] verdict parse failed:", err)
-      // Fallbacks above stay in place.
     }
 
     return Response.json({
@@ -188,12 +174,10 @@ export async function POST(req: Request) {
       score,
       verdict,
       mustFix,
+      isRevision,
     })
   } catch (err) {
     console.error("[v0] /api/critique error:", err)
-    return Response.json(
-      { error: extractApiErrorMessage(err) },
-      { status: 500 },
-    )
+    return Response.json({ error: extractApiErrorMessage(err) }, { status: 500 })
   }
 }
