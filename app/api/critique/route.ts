@@ -1,4 +1,5 @@
 import { generateText, type LanguageModel } from "ai"
+import { google } from "@ai-sdk/google"
 import { anthropic } from "@ai-sdk/anthropic"
 import { openai } from "@ai-sdk/openai"
 import { INVESTORS, VERDICT_PROMPT } from "@/lib/investors"
@@ -8,11 +9,15 @@ export const runtime = "nodejs"
 
 /**
  * Provider auto-detection.
- * - Prefers ANTHROPIC_API_KEY (the playbook default).
- * - Falls back to OPENAI_API_KEY.
- * - Returns a clear 503 if neither is set, so the UI can surface a real message.
+ * - Prefers GOOGLE_GENERATIVE_AI_API_KEY (Gemini — fast and cheap).
+ * - Then ANTHROPIC_API_KEY.
+ * - Then OPENAI_API_KEY.
+ * - Returns a clear 503 if none are set, so the UI can surface a real message.
  */
-function resolveModel(): { model: LanguageModel; provider: "anthropic" | "openai" } | null {
+function resolveModel(): { model: LanguageModel; provider: "google" | "anthropic" | "openai" } | null {
+  if (process.env.GOOGLE_GENERATIVE_AI_API_KEY) {
+    return { model: google("gemini-2.0-flash"), provider: "google" }
+  }
   if (process.env.ANTHROPIC_API_KEY) {
     return { model: anthropic("claude-3-5-haiku-latest"), provider: "anthropic" }
   }
@@ -35,7 +40,7 @@ export async function POST(req: Request) {
       return Response.json(
         {
           error:
-            "No AI provider configured. Add ANTHROPIC_API_KEY or OPENAI_API_KEY to your environment variables and redeploy.",
+            "No AI provider configured. Add GOOGLE_GENERATIVE_AI_API_KEY, ANTHROPIC_API_KEY, or OPENAI_API_KEY to your environment variables and redeploy.",
         },
         { status: 503 },
       )

@@ -50,17 +50,18 @@ cp .env.example .env.local   # then add your key
 pnpm dev
 ```
 
-You need one of:
+You need one of (auto-detected in this order):
 
-- `ANTHROPIC_API_KEY` (preferred — uses `claude-3-5-haiku-latest`)
-- `OPENAI_API_KEY` (fallback — uses `gpt-4o-mini`)
+- `GOOGLE_GENERATIVE_AI_API_KEY` (recommended — uses `gemini-2.0-flash`, fast + cheap)
+- `ANTHROPIC_API_KEY` (uses `claude-3-5-haiku-latest`)
+- `OPENAI_API_KEY` (uses `gpt-4o-mini`)
 
 The route at `app/api/critique/route.ts` auto-detects which one is set.
 
 ## Deploy to Vercel
 
 1. Push to GitHub and import the repo into Vercel.
-2. In **Project Settings → Environment Variables**, add `ANTHROPIC_API_KEY` (or `OPENAI_API_KEY`) for the **Production**, **Preview**, and **Development** environments.
+2. In **Project Settings → Environment Variables**, add `GOOGLE_GENERATIVE_AI_API_KEY` (or one of the alternatives) for the **Production**, **Preview**, and **Development** environments.
 3. **Redeploy.** This is the #1 hackathon deploy failure: env vars added after the first deploy do not apply until you redeploy.
 
 ## Try it
@@ -74,7 +75,7 @@ Hit **KILL MY IDEA** and watch the room tear it apart.
 ## Tech
 
 - Next.js (App Router)
-- AI SDK 6 with `@ai-sdk/anthropic` and `@ai-sdk/openai`
+- AI SDK 6 with `@ai-sdk/google`, `@ai-sdk/anthropic`, and `@ai-sdk/openai`
 - Tailwind CSS v4 + shadcn/ui
 - Lucide icons
 - TypeScript
