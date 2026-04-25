@@ -112,9 +112,9 @@ export async function POST(req: Request) {
         const { text } = await generateWithRetry({
           model,
           system: investor.systemPrompt,
-          prompt: `The founder just pitched the following:\n\n"""${trimmedPitch}"""\n\nDeliver your critique now. Stay in character. 3-5 sentences MAX. No greeting. Open with the kill shot.`,
-          temperature: 0.85,
-          maxOutputTokens: 280,
+          prompt: `The founder just pitched you in the meeting:\n\n"""${trimmedPitch}"""\n\nIt's your turn to speak. Stay 100% in character — voice, vocabulary, attitude, all of it. React the way YOU specifically would react. No greeting. Open mid-thought. 2-6 sentences. Vary your cadence — short and brutal, or longer with one concession before the kill. Be the human being described in your persona, not a generic VC.`,
+          temperature: 0.95,
+          maxOutputTokens: 320,
         })
         return {
           id: investor.id,
@@ -160,9 +160,9 @@ export async function POST(req: Request) {
       const { text: verdictRaw } = await generateWithRetry({
         model,
         system: VERDICT_PROMPT,
-        prompt: `PITCH:\n"""${trimmedPitch}"""\n\nPANEL CRITIQUES:\n${transcript}\n\nReturn the JSON now.`,
-        temperature: 0.4,
-        maxOutputTokens: 300,
+        prompt: `PITCH:\n"""${trimmedPitch}"""\n\nPANEL CRITIQUES:\n${transcript}\n\nNow write the moderator's read of the room. The mustFix MUST paraphrase the single sharpest thing the panel said — do not invent generic advice. Return ONLY the JSON.`,
+        temperature: 0.6,
+        maxOutputTokens: 340,
       })
 
       const cleaned = verdictRaw
