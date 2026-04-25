@@ -1,4 +1,5 @@
 import { generateText, type LanguageModel } from "ai"
+import { groq } from "@ai-sdk/groq"
 import { google } from "@ai-sdk/google"
 import { anthropic } from "@ai-sdk/anthropic"
 import { openai } from "@ai-sdk/openai"
@@ -9,13 +10,20 @@ export const runtime = "nodejs"
 
 /**
  * Provider auto-detection.
- * - Prefers GOOGLE_GENERATIVE_AI_API_KEY (Gemini — fast and cheap).
- *   Uses gemini-1.5-flash-latest because gemini-2.0-flash has zero free-tier
- *   quota on most newly-issued keys.
- * - Then ANTHROPIC_API_KEY.
- * - Then OPENAI_API_KEY.
+ * - Prefers GROQ_API_KEY (free tier, no card, fastest inference — perfect for
+ *   the parallel-fire investor demo).
+ * - Then GOOGLE_GENERATIVE_AI_API_KEY (Gemini 1.5 Flash, generous free tier).
+ * - Then ANTHROPIC_API_KEY, then OPENAI_API_KEY.
  */
-function resolveModel(): { model: LanguageModel; provider: "google" | "anthropic" | "openai" } | null {
+function resolveModel(): {
+  model: LanguageModel
+  provider: "groq" | "google" | "anthropic" | "openai"
+} | null {
+  if (process.env.GROQ_API_KEY) {
+    // llama-3.3-70b-versatile is excellent for personality-driven prompts and
+    // is on Groq's free tier with very high RPM limits.
+    return { model: groq("llama-3.3-70b-versatile"), provider: "groq" }
+  }
   if (process.env.GOOGLE_GENERATIVE_AI_API_KEY) {
     return { model: google("gemini-1.5-flash-latest"), provider: "google" }
   }
@@ -88,7 +96,7 @@ export async function POST(req: Request) {
       return Response.json(
         {
           error:
-            "No AI provider configured. Add GOOGLE_GENERATIVE_AI_API_KEY, ANTHROPIC_API_KEY, or OPENAI_API_KEY to your environment variables and redeploy.",
+            "No AI provider configured. Add GROQ_API_KEY, GOOGLE_GENERATIVE_AI_API_KEY, ANTHROPIC_API_KEY, or OPENAI_API_KEY to your environment variables and redeploy.",
         },
         { status: 503 },
       )
